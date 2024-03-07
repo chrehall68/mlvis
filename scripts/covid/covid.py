@@ -5,8 +5,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from typing import Dict
 import random
 from tqdm import tqdm
-import seaborn as sns
-import pandas as pd
 import pickle
 from argparse import ArgumentParser
 
@@ -141,26 +139,6 @@ for idx, entry in enumerate((prog := tqdm(ds))):
     if correct:
         num_correct += 1
     prog.set_postfix_str(f"acc: {num_correct/(idx+1):.3f}")
-
-
-sns.set_context("paper")
-
-
-df = {"labels": []}
-for key, val in responses.items():
-    df["labels"].extend([key] * len(val))
-df = pd.DataFrame.from_dict(df)
-
-
-sns.countplot(df, x="labels")
-
-
-accepted = ["A", "B", "C", "D", "E", "F"]
-filtered = df.map(lambda val: val if val in accepted else "UNK")
-sns.countplot(
-    filtered,
-    x="labels",
-).set_title(f"{model_name} 0-shot")
 
 
 pickle.dump(

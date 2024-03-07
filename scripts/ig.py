@@ -5,8 +5,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 import random
 from argparse import ArgumentParser
-from liar_experiment.liar_utils import *
-
+from utils.utils import *
 
 # set up argument parser
 parser = ArgumentParser()
@@ -27,6 +26,12 @@ parser.add_argument(
     help="How many steps to use when approximating integrated gradients",
 )
 parser.add_argument("samples", type=int, help="How many different samples to take")
+parser.add_argument(
+    "dataset",
+    type=str,
+    choices=["covid", "liar"],
+    help="the dataset to run the experiment on",
+)
 
 
 if __name__ == "__main__":
@@ -34,10 +39,15 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
 
     # load dataset
-    liar = datasets.load_dataset("liar")
-    full_liar = datasets.concatenate_datasets(
-        [liar["train"], liar["test"], liar["validation"]]
-    )
+    if args.dataset == "liar":
+        from liar_experiment.liar_utils import *
+
+        ds = datasets.load_dataset("liar")
+    else:
+        from covid.covid_utils import *
+
+        ds = datasets.load_dataset("nanyy1025/covid_fake_news")
+    ds = datasets.concatenate_datasets([ds[el] for el in ds])
 
     # load model
     model_name = MODEL_DICT[args.model]
@@ -51,7 +61,7 @@ if __name__ == "__main__":
     )
 
     # get examples
-    entries = random.choices(list(range(len(full_liar))), k=args.shot)
+    entries = random.choices(list(range(len(ds))), k=args.shot)
 
     # figure out which tokens correspond to A,B,C,D,E,F
     vocab = tokenizer.vocab
@@ -71,7 +81,7 @@ if __name__ == "__main__":
     for sample in range(args.samples):
         # make prompt
         prompt = to_n_shot_prompt(
-            args.shot, full_liar[random.randint(0, len(full_liar))], full_liar, entries
+            args.shot, ds[random.randint(0, len(ds))], ds, entries
         )
         print(prompt)
 
@@ -157,4 +167,4 @@ if __name__ == "__main__":
         )
         html = visualize_text([attr_vis])
 
-        save_results("ig", html, attributions, model_name, sample)
+        save_results("ig", html, attributions, model_name, sample, args.dataset)

@@ -1,30 +1,14 @@
 import os
 import datasets
 import argparse
-from typing import Dict
 import captum.attr as attr
 from captum._utils.models.linear_model import SkLearnLasso
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 import torch.nn.functional as F
 import random
-from liar_experiment.liar_utils import *
+from utils.utils import *
 
-# globals
-MODEL_MAP = {
-    "falcon": "tiiuae/falcon-7b-instruct",
-    "llama": "meta-llama/Llama-2-7b-chat-hf",
-    "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
-    "orca": "microsoft/Orca-2-7b",
-}
-
-
-def was_correct(decoded: str, entry: Dict[str, int]) -> bool:
-    return LABEL_MAP[entry["label"]] in decoded
-
-
-# use argparse to take experiment_type (string), model_name (string, either llama, falcon, mistral, or orca),
-# n_examples (int, either 0, 1, or 5), n_perturbation_samples (an arbitrary int), and n_samples (how many times to run the experiment)
 parser = argparse.ArgumentParser()
 parser.add_argument("device", type=int, choices=[0, 1], help="the cuda device to use")
 parser.add_argument(
@@ -49,6 +33,12 @@ parser.add_argument(
 )
 parser.add_argument(
     "n_samples", type=int, help="the number of times to run the experiment"
+)
+parser.add_argument(
+    "dataset",
+    type=str,
+    choices=["covid", "liar"],
+    help="the dataset to run the experiment on",
 )
 
 
@@ -109,18 +99,24 @@ if __name__ == "__main__":
     n_examples = args.n_examples
     n_perturbation_samples = args.n_perturbation_samples
     n_samples = args.n_samples
+    dataset_name = args.dataset
 
     # setup the device
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
 
     # load dataset
-    liar = datasets.load_dataset("liar")
-    full_liar = datasets.concatenate_datasets(
-        [liar["train"], liar["test"], liar["validation"]]
-    )
+    if dataset_name == "liar":
+        from liar_experiment.liar_utils import *
+
+        ds = datasets.load_dataset("liar")
+    else:
+        from covid.covid_utils import *
+
+        ds = datasets.load_dataset("nanyy1025/covid_fake_news")
+    ds = datasets.concatenate_datasets([ds[el] for el in ds])
 
     # load model
-    model_name = MODEL_MAP[model_name]
+    model_name = MODEL_DICT[model_name]
     config = BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16
     )
@@ -131,7 +127,7 @@ if __name__ == "__main__":
     )
 
     # calculate entries
-    entries = random.choices(list(range(len(full_liar))), k=n_examples)
+    entries = random.choices(list(range(len(ds))), k=n_examples)
 
     # calculate vocab
     vocab = tokenizer.vocab
@@ -150,7 +146,7 @@ if __name__ == "__main__":
 
     for sample in range(n_samples):
         prompt = to_n_shot_prompt(
-            n_examples, full_liar[random.randint(0, len(full_liar))], full_liar, entries
+            n_examples, ds[random.randint(0, len(ds))], ds, entries
         )
         print(prompt)
         # get tokens for later
@@ -212,4 +208,11 @@ if __name__ == "__main__":
         )
         html = visualize_text([attr_vis])
 
-        save_results(experiment_type.lower(), html, attributions, model_name, sample)
+        save_results(
+            experiment_type.lower(),
+            html,
+            attributions,
+            model_name,
+            sample,
+            dataset_name,
+        )

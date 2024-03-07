@@ -2,3 +2,5 @@ converted-llama/
 *.txt
 experiment/
 .env
+html/
+pt/
