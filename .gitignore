@@ -4,3 +4,4 @@ experiment/
 .env
 html/
 pt/
+__pycache__/

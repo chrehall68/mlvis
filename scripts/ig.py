@@ -32,6 +32,13 @@ parser.add_argument(
     choices=["covid", "liar"],
     help="the dataset to run the experiment on",
 )
+parser.add_argument(
+    "--batch_size",
+    type=int,
+    default=2,
+    help="Internal batch size to use when calculating integrated gradients",
+    required=False,
+)
 
 
 if __name__ == "__main__":
@@ -120,7 +127,7 @@ if __name__ == "__main__":
             baselines=baselines,
             target=label_tokens[label],
             n_steps=args.steps,
-            internal_batch_size=2,
+            internal_batch_size=args.batch_size,
             return_convergence_delta=True,
         )
 
