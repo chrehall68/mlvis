@@ -1,16 +1,11 @@
 import os
 import datasets
-import captum
 import captum.attr as attr
-from captum.attr import visualization as viz
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 import torch
 import random
-from typing import Dict, Any
-from dataclasses import dataclass
-from IPython.display import HTML
 from argparse import ArgumentParser
-
+from utils.utils import *
 
 # set up argument parser
 parser = ArgumentParser()
@@ -24,158 +19,26 @@ parser.add_argument(
 parser.add_argument(
     "shot", type=int, choices=[0, 1, 5], help="How many examples to give"
 )
-parser.add_argument("samples", type=int, help="How many different samples to take")
 parser.add_argument(
     "steps",
     type=int,
     default=512,
     help="How many steps to use when approximating integrated gradients",
 )
-
-# globals
-MODEL_DICT = {
-    "falcon": "tiiuae/falcon-7b-instruct",
-    "llama": "meta-llama/Llama-2-7b-chat-hf",
-    "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
-    "orca": "microsoft/Orca-2-7b",
-}
-LABEL_MAP = {
-    0: "E",  # 0 : False
-    1: "C",  # 1 : Half True
-    2: "B",  # 2 : Mostly True
-    3: "A",  # 3 : True
-    4: "D",  # 4 : Barely True
-    5: "F",  # 5 : Pants on Fire
-}
-random.seed(2024)
-
-
-# functions
-def to_zero_shot_prompt(entry: Dict[str, str]) -> str:
-    speaker = entry["speaker"].replace("-", " ").title()
-    try:
-        statement = entry["statement"][entry["statement"].index("Says ") + 5 :]
-    except:
-        statement = entry["statement"]
-
-    prompt = f"""Please select the option that most closely describes the following claim by {speaker}:\n{statement}\n\nA) True\nB) Mostly True\nC) Half True\nD) Barely True\nE) False\nF) Pants on Fire (absurd lie)\n\nChoice: ("""
-    return prompt
-
-
-def to_n_shot_prompt(n: int, entry: Dict[str, str], full_liar) -> str:
-    examples = ""
-    for i in range(n):
-        examples += (
-            to_zero_shot_prompt(full_liar[entries[i]])
-            + LABEL_MAP[full_liar[entries[i]]["label"]]
-            + "\n\n"
-        )
-    prompt = to_zero_shot_prompt(entry)
-    return examples + prompt
-
-
-def softmax_results(inputs: torch.Tensor):
-    result = model(inputs.cuda()).logits
-    return torch.nn.functional.softmax(result[:, -1], dim=-1).cpu()
-
-
-def softmax_results_embeds(embds: torch.Tensor):
-    result = model(inputs_embeds=embds.cuda()).logits
-    return torch.nn.functional.softmax(result[:, -1], dim=-1).cpu()
-
-
-def summarize_attributions(attributions):
-    with torch.no_grad():
-        attributions = attributions.sum(dim=-1).squeeze(0)
-        return attributions
-
-
-@dataclass
-class CustomDataRecord:
-    word_attributions: Any
-    pred_prob: torch.Tensor
-    pred_class: str
-    attr_class: str
-    attr_prob: torch.Tensor
-    attr_score: Any
-    raw_input_ids: Any | list[str]
-    convergence_delta: Any
-
-
-def _get_color(attr):
-    # clip values to prevent CSS errors (Values should be from [-1,1])
-    attr = max(-2, min(2, attr))
-    if attr > 0:
-        hue = 120
-        sat = 75
-        lig = 100 - int(50 * attr)
-    else:
-        hue = 0
-        sat = 75
-        lig = 100 - int(-40 * attr)
-    return "hsl({}, {}%, {}%)".format(hue, sat, lig)
-
-
-def visualize_text(
-    datarecords: list[CustomDataRecord], legend: bool = True
-) -> "HTML":  # In quotes because this type doesn't exist in standalone mode
-    dom = ["<table width: 100%>"]
-    rows = [
-        "<tr><th>Predicted Label</th>"
-        "<th>Attribution Label</th>"
-        "<th>Convergence Delta</th>"
-        "<th>Attribution Score</th>"
-        "<th>Word Importance</th>"
-    ]
-    for datarecord in datarecords:
-        rows.append(
-            "".join(
-                [
-                    "<tr>",
-                    viz.format_classname(
-                        "{0} ({1:.2f})".format(
-                            datarecord.pred_class, datarecord.pred_prob
-                        )
-                    ),
-                    viz.format_classname(
-                        "{0} ({1:.2f})".format(
-                            datarecord.attr_class, datarecord.attr_prob
-                        )
-                    ),
-                    viz.format_classname(
-                        "{0:.2f}".format(datarecord.convergence_delta.item())
-                    ),
-                    viz.format_classname("{0:.2f}".format(datarecord.attr_score)),
-                    viz.format_word_importances(
-                        datarecord.raw_input_ids, datarecord.word_attributions
-                    ),
-                    "<tr>",
-                ]
-            )
-        )
-
-    if legend:
-        dom.append(
-            '<div style="border-top: 1px solid; margin-top: 5px; \
-            padding-top: 5px; display: inline-block">'
-        )
-        dom.append("<b>Legend: </b>")
-
-        for value, label in zip([-1, 0, 1], ["Negative", "Neutral", "Positive"]):
-            dom.append(
-                '<span style="display: inline-block; width: 10px; height: 10px; \
-                border: 1px solid; background-color: \
-                {value}"></span> {label}  '.format(
-                    value=_get_color(value), label=label
-                )
-            )
-        dom.append("</div>")
-
-    dom.append("".join(rows))
-    dom.append("</table>")
-    html = HTML("".join(dom))
-
-    return html
+parser.add_argument("samples", type=int, help="How many different samples to take")
+parser.add_argument(
+    "dataset",
+    type=str,
+    choices=["covid", "liar"],
+    help="the dataset to run the experiment on",
+)
+parser.add_argument(
+    "--batch_size",
+    type=int,
+    default=2,
+    help="Internal batch size to use when calculating integrated gradients",
+    required=False,
+)
 
 
 if __name__ == "__main__":
@@ -183,10 +46,15 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
 
     # load dataset
-    liar = datasets.load_dataset("liar")
-    full_liar = datasets.concatenate_datasets(
-        [liar["train"], liar["test"], liar["validation"]]
-    )
+    if args.dataset == "liar":
+        from liar_experiment.liar_utils import *
+
+        ds = datasets.load_dataset("liar")
+    else:
+        from covid.covid_utils import *
+
+        ds = datasets.load_dataset("nanyy1025/covid_fake_news")
+    ds = datasets.concatenate_datasets([ds[el] for el in ds])
 
     # load model
     model_name = MODEL_DICT[args.model]
@@ -200,7 +68,7 @@ if __name__ == "__main__":
     )
 
     # get examples
-    entries = random.choices(list(range(len(full_liar))), k=args.shot)
+    entries = random.choices(list(range(len(ds))), k=args.shot)
 
     # figure out which tokens correspond to A,B,C,D,E,F
     vocab = tokenizer.vocab
@@ -220,7 +88,7 @@ if __name__ == "__main__":
     for sample in range(args.samples):
         # make prompt
         prompt = to_n_shot_prompt(
-            args.shot, full_liar[random.randint(0, len(full_liar))], full_liar
+            args.shot, ds[random.randint(0, len(ds))], ds, entries
         )
         print(prompt)
 
@@ -253,13 +121,13 @@ if __name__ == "__main__":
         baselines = torch.zeros_like(input_embs).cpu()
 
         # calculate integrated gradients
-        ig = attr.IntegratedGradients(softmax_results_embeds)
+        ig = attr.IntegratedGradients(lambda inps: softmax_results_embeds(inps, model))
         attributions = ig.attribute(
             input_embs,
             baselines=baselines,
             target=label_tokens[label],
             n_steps=args.steps,
-            internal_batch_size=2,
+            internal_batch_size=args.batch_size,
             return_convergence_delta=True,
         )
 
@@ -276,7 +144,7 @@ if __name__ == "__main__":
                 model.transformer, interpretable_emb
             )
         with torch.no_grad():
-            predictions = softmax_results(tokens)
+            predictions = softmax_results(tokens, model)
 
         MARGIN_OF_ERROR = 0.1  # off by no more than 10 percentage points
         if (
@@ -290,10 +158,10 @@ if __name__ == "__main__":
                 "we should be getting somewhere near",
                 predictions[0, label_tokens[label]],
             )
-            print("instead, we get", summarized_attributions[label].sum())
+            print("instead, we get", summarized_attributions.sum())
 
         # make and save html
-        SCALE = 2 / summarized_attributions.max()
+        SCALE = 2 / summarized_attributions.abs().max()
         attr_vis = CustomDataRecord(
             summarized_attributions * SCALE,  # word attributions
             predictions[0].max(),  # predicted probability
@@ -305,6 +173,5 @@ if __name__ == "__main__":
             attributions[1],  # convergence delta
         )
         html = visualize_text([attr_vis])
-        open(f"ig/{model_name[model_name.index('/')+1:]}_{sample}.html", "w").write(
-            html.data
-        )
+
+        save_results("ig", html, attributions, model_name, sample, args.dataset)
