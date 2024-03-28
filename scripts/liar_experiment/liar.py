@@ -1,7 +1,13 @@
 from typing import Dict
 import datasets
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    BitsAndBytesConfig,
+    AutoConfig,
+)
+import accelerate
 import random
 from tqdm import tqdm
 import pickle
@@ -52,14 +58,25 @@ def workflow(idx: int, entry: dict, model, verbose: bool = False) -> bool:
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("device", type=int, choices=[0, 1], help="cuda device to use")
 parser.add_argument("model", type=str, choices=["falcon", "llama", "mistral", "orca"])
 parser.add_argument("shot", type=int, choices=[0, 1, 5])
+parser.add_argument(
+    "--device", type=int, help="cuda device to use", required=False, default=-1
+)
+parser.add_argument(
+    "--full",
+    required=False,
+    type=bool,
+    help="Whether to use full fp16 precision",
+    default=False,
+)
 
 if __name__ == "__main__":
     args = parser.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
+    if args.device != -1:
+        os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
     # load full dataset
     liar = datasets.load_dataset("liar")
@@ -77,14 +94,34 @@ if __name__ == "__main__":
     model_name = model_map[args.model]
 
     # load model
-    config = BitsAndBytesConfig(
-        load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16
-    )
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=config,  # device_map="auto"
-    )
+    if not args.full:
+        config = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=config,  # device_map="auto"
+        )
+    else:
+        config = AutoConfig.from_pretrained(model_name)
+        with accelerate.init_empty_weights():
+            model = AutoModelForCausalLM.from_config(
+                config=config, torch_dtype=torch.bfloat16
+            )
+        model.tie_weights()
+        dev_map = accelerate.infer_auto_device_map(
+            model,
+            max_memory={0: "11GB", 1: "7GB"},
+            no_split_module_classes=[
+                "LlamaDecoderLayer",
+                "MistralDecoderLayer",
+                "FalconDecoderLayer",
+            ],
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=torch.bfloat16, device_map=dev_map
+        )
 
     # setup
     n_examples = args.shot
@@ -105,13 +142,17 @@ if __name__ == "__main__":
         prog.set_postfix_str(f"acc: {num_correct/(idx+1):.3f}")
 
     # log results
+    tail = "" if not args.full else "_full"
     pickle.dump(
         responses,
-        open(f"{model_name[model_name.index('/')+1:]}_{n_examples}responses.pk", "wb"),
+        open(
+            f"{model_name[model_name.index('/')+1:]}_{n_examples}responses{tail}.pk",
+            "wb",
+        ),
     )
-    with open(f"{n_examples}_shot.txt", "a") as file:
+    with open(f"{n_examples}_shot{tail}.txt", "a") as file:
         file.write(f"{model_name} : {num_correct}/{len(full_liar)-len(entries)}\n")
 
     # print results up till now
-    with open(f"{n_examples}_shot.txt", "r") as file:
+    with open(f"{n_examples}_shot{tail}.txt", "r") as file:
         print(file.read())

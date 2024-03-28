@@ -10,7 +10,7 @@ from argparse import ArgumentParser
 from covid_utils import *
 
 parser = ArgumentParser()
-parser.add_argument("device", type=int, choices=[0, 1])
+parser.add_argument("device", type=int)
 parser.add_argument("model", type=str, choices=["llama", "falcon", "mistral", "orca"])
 parser.add_argument("shot", type=int, choices=[0, 1, 5])
 
@@ -19,7 +19,7 @@ responses: Dict[str, list] = {}
 
 
 # workflow specific functions
-def workflow(idx: int, entry: dict, model, k: int = 0, verbose: bool = False) -> bool:
+def workflow(idx: int, entry: dict, model, verbose: bool = False) -> bool:
     # encode input, move it to cuda, then generate
     encoded_input = tokenizer(entry["prompt"], return_tensors="pt")
     encoded_input = {item: val.cuda() for item, val in encoded_input.items()}
