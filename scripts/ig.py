@@ -39,6 +39,7 @@ parser.add_argument(
     help="Internal batch size to use when calculating integrated gradients",
     required=False,
 )
+parser.add_argument("--items", type=int, nargs="+", required=False, default=-1)
 
 
 if __name__ == "__main__":
@@ -85,11 +86,15 @@ if __name__ == "__main__":
             label_tokens[char].append(idx)
     label_tokens = {char: idxs[0] for char, idxs in label_tokens.items()}
 
+    if args.items != -1:
+        assert len(args.items) == args.samples
     for sample in range(args.samples):
+        if args.items != -1:
+            entry = ds[args.items[sample]]
+        else:
+            entry = ds[random.randint(0, len(ds))]
         # make prompt
-        prompt = to_n_shot_prompt(
-            args.shot, ds[random.randint(0, len(ds))], ds, entries
-        )
+        prompt = to_n_shot_prompt(args.shot, entry, ds, entries)
         print(prompt)
 
         # get tokens for later

@@ -40,6 +40,7 @@ parser.add_argument(
     choices=["covid", "liar"],
     help="the dataset to run the experiment on",
 )
+parser.add_argument("--items", type=int, nargs="+", required=False, default=-1)
 
 
 # specific functions
@@ -144,11 +145,17 @@ if __name__ == "__main__":
             label_tokens[char].append(idx)
     label_tokens = {char: idxs[0] for char, idxs in label_tokens.items()}
 
-    for sample in range(n_samples):
-        prompt = to_n_shot_prompt(
-            n_examples, ds[random.randint(0, len(ds))], ds, entries
-        )
+    if args.items != -1:
+        assert len(args.items) == args.samples
+    for sample in range(args.samples):
+        if args.items != -1:
+            entry = ds[args.items[sample]]
+        else:
+            entry = ds[random.randint(0, len(ds))]
+        # make prompt
+        prompt = to_n_shot_prompt(args.shot, entry, ds, entries)
         print(prompt)
+
         # get tokens for later
         tokens = tokenizer(prompt, return_tensors="pt").input_ids
 
