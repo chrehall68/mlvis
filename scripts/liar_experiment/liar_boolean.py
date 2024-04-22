@@ -128,10 +128,6 @@ if __name__ == "__main__":
     # run experiment
     entries = random.choices(list(range(len(full_liar))), k=args.shot)
 
-    workflow(
-        0, train[random.randint(0, len(train) - 1)], model, verbose=True, k=args.shot
-    )
-
     num_correct = 0
     responses = {}
     for idx, entry in enumerate((prog := tqdm(full_liar))):
